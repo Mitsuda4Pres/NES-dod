@@ -55,8 +55,10 @@ controller:     .res 1    ;reserve 1 byte for controller input
 drawcomplete:   .res 1
 ptr:            .res 1
 objcount:       .res 1
-objindex:       .res 1
+tempvar:        .res 1
 collisiontmp:   .res 1     ;used in collision routine to store extra value
+xhold:          .res 1
+yhold:          .res 1      ;I could potentially just keep a handful of generaic vars on zero page and reuse them
 scrollx:        .res 1
 scrolly:        .res 1
 
@@ -117,15 +119,15 @@ CLEARMEM:
 ;All of these values are set in the array
 
     LDA #$00
+    LDX #$00
     STA objcount
-    STA objindex
 ;initialize player entity
     LDA EntityType::PlayerType
-    STA TYPE, objindex
+    STA TYPE
     LDA #$80
-    STA XPOS, objindex
+    STA XPOS
     LDA #$78
-    STA YPOS, objindex
+    STA YPOS
 
 
 
@@ -292,27 +294,27 @@ checkleft:
     LDA controller          ;I think 1 means not pressed and 0 means pressed (opposite normal)
     AND #$02                ;abssudLr  bit2 is left, AND will return true if left is 1 (not pressed) then jump to checkright
     BEQ checkright          ;
-    DEC entities+Entity::xpos   ;decrement x position
+    DEC XPOS   ;decrement x position
     JMP checkup ; don't allow for left and right at the same time (jump past checkright if left was pressed)
 
 checkright:
     LDA controller
     AND #$01
     BEQ checkup
-    INC entities+Entity::xpos
+    INC XPOS
 
 checkup:
     LDA controller
     AND #$08
     BEQ checkdown
-    DEC entities+Entity::ypos
+    DEC YPOS
     JMP donecheckingdirectional ;jump past check down so not getting both simultaneous
 
 checkdown:
     LDA controller
     AND #$04
     BEQ donecheckingdirectional
-    INC entities+Entity::ypos
+    INC YPOS
 
 donecheckingdirectional:
 
@@ -356,138 +358,119 @@ checkarelease:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Second area to change, entity logic                                    ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+addbullet:  ;gather attributes for bullet then begin create process
+    LDY #EntityType::Bullet
+    LDA XPOS        ;player's x-pos
+    CLC
+    ADC #$04        ;center of player sprite
+    STA xhold
+    LDA YPOS        ;player's y-pos
+    STA yhold               
+    JMP addentity
+addenemy:
+    LDY #EntityType::Enemy
+    LDA XPOS        ;player's x-pos
+    STA xhold
+    LDA #$08        
+    STA yhold
+    JMP addentity
 
-
-addbullet:
+addentity:
     INC objcount
     LDA objcount
     CMP #$40               ;arrays hold 64 objects, max entities
     BEQ finishcontrols
-    LDA #$00
-    STA objindex            ;reset object index to search for lowest open slot
-findlowestindex:
-    
-
-
-
-
-
-
-
-
-
-    CPX #TOTALENTITIES 
-    BEQ finishcontrols                  ;if we've hit the max then there are no more available entities for this
-    LDA entities+Entity::type, x        ;get the entity type from memory
-    CMP #EntityType::NoEntity            ;is this a used entity slot?
-    BEQ addbulletentity                 ;if it's free, add the bullet
-    TXA                                 ;if it's not, increment to the next entity and loop
-    CLC
-    ADC #.sizeof(Entity)
-    TAX
-    JMP addbulletloop                   ;end loop
-addbulletentity:
-    LDA entities+Entity::xpos           ; get player position then offset bullet accordingly (player is first entity)
-    CLC
-    ADC #$04                            ;offset 4 px from top left of player to "center" the bullet
-    STA entities+Entity::xpos, x        ;store into bullets position in entities array (x is still holding this new bullet's index)
-    LDA entities+Entity::ypos            ;get player's ypos
-    STA entities+Entity::ypos, x
-    LDA #EntityType::Bullet
-    STA entities+Entity::type, x
-    JMP finishcontrols
-
-
-addenemy:
     LDX #$00
-addenemyloop:
-    CPX #TOTALENTITIES
-    BEQ finishcontrols
-    LDA entities+Entity::type, X
+findlowestindexloop:        ;potential for infinte loop? If TYPE is full, it shouldn't make it this far
+    LDA TYPE, X
     CMP #EntityType::NoEntity
-    BEQ addenemyentity
-    TXA
-    CLC
-    ADC #.sizeof(Entity)
-    TAX
-    JMP addenemyloop
-addenemyentity:
-    LDA entities+Entity::xpos
-    STA entities+Entity::xpos, X
-    LDA #$08
-    STA entities+Entity::ypos, X
-    LDA #EntityType::Enemy
-    STA entities+Entity::type, X
+    BEQ createentity
+    INX
+    JMP findlowestindexloop
+createentity:
+    TYA                     ;pull new entity's type from Y
+    STA TYPE, X
+    LDA xhold
+    STA XPOS, X
+    LDA yhold
+    STA YPOS, X
     JMP finishcontrols
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 finishcontrols:
-processscrolling:
-    LDA scrolly
-    SEC
-    SBC #$02
-    STA scrolly
-    CMP #$00
-    BNE donescroll
-    LDA #$EE
-    STA scrolly
-    LDA swap
-    EOR #$02
-    STA swap
-donescroll:
+
+;no scrolling for the moment
+;processscrolling:
+;    LDA scrolly
+;    SEC
+;    SBC #$02
+;    STA scrolly
+;    CMP #$00
+;    BNE donescroll
+;    LDA #$EE
+;    STA scrolly
+;    LDA swap
+;    EOR #$02
+;    STA swap
+;donescroll:
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;           Third area to alter                  ;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 processentities:
-    LDX #.sizeof(Entity)
+    LDX #$01        ;no need to process "player" here, start at 1
 processentitiesloop:
-    LDA entities+Entity::type, x
+    LDA objcount
+    STA tempvar
+    INC tempvar          ;compare current iteration to objcount+1 (index needs to run loop if it is the same number as objcount)
+    TXA
+    CMP tempvar
+    BEQ doneprocessentities
+    LDA TYPE, X     ;What type of entity is this iteration?
+    CMP #EntityType::NoEntity
+    BEQ processentitiesloop
     CMP #EntityType::Bullet
     BEQ processbullet
     CMP #EntityType::Enemy
     BEQ processenemy
-    JMP skipentity          ;skip if not a bullet
+    ;This instruction should never be called. Worst case, JMP to end, nothing happens.
+    JMP doneprocessentities   ;Thought about jumping up to top of loop, but could create infinite loop theoretically       
 processbullet:
-    LDA entities+Entity::ypos, x
+    LDA YPOS, X
     SEC
     SBC #$03                ;move bullet forward 3 pixels
     ;collision detection - (check before or after store y ?), set up explosion, destroy entities, etc.
     JSR checkbulletcollision   ;going in: x is bullet index, A is new bullet y-pos
 
-    STA entities+Entity::ypos, x ;store back into ypos
-    BCS entitycomplete      ;if greater than zero (didn't use carry bit), move to next entity
-    JMP clearentity
+    STA YPOS, X             ;store back into ypos
+    BCS processentitiesloop ;if greater than zero (didn't use carry bit), move to next entity
+    JMP clearentity         ;Otherwise it has moved off screen, clear
 processenemy:
-    INC entities+Entity::data, x    ;counter for subpixel movement (increment to, say 3, for "1/3" pixel per frame)
-    LDA entities+Entity::data, x
+    INC DATA, x    ;counter for subpixel movement (increment to, say 3, for "1/3" pixel per frame)
+    LDA DATA, x
     CMP #$03
     BNE processenemyskipyinc
     LDA #$00
-    STA entities+Entity::data, x
-    INC entities+Entity::ypos, x    ;move enemy forward 1
+    STA DATA, x
+    INC YPOS, x    ;move enemy forward 1
 processenemyskipyinc:
-    LDA entities+Entity::ypos, x
+    LDA YPOS, x
     CMP #$FE
-    BNE entitycomplete
+    BNE processentitiesloop
     ;JMP clearentity
 clearentity:
     LDA #EntityType::NoEntity       ;NoEntity is $00 anyway
-    STA entities+Entity::type, x
-    STA entities+Entity::data, x
+    STA TYPE, X
     LDA #$FF
-    STA entities+Entity::ypos, x
-    STA entities+Entity::xpos, x
-    JMP entitycomplete
-entitycomplete:
-skipentity:
-    TXA
-    CLC
-    ADC #.sizeof(Entity)
-    TAX
-    CMP #TOTALENTITIES                    ;has x-index reached the end yet?
-    BNE processentitiesloop
+    STA YPOS, x
+    STA XPOS, x
+    LDA #$00
+    STA DATA, X
+    JMP processentitiesloop
+
 doneprocessentities:
-    NOP
-    NOP
-    NOP
+    ;Increment the indices?
 waitfordrawtocomplete:
     LDA drawcomplete
     CMP #$01
@@ -510,71 +493,67 @@ checkbulletcollision:
     PHA     ;Save A and X registers (new y value of bullet and bullet index respectively)
     TXA
     PHA
-    PHP     ;saving P because carry flag is needed right after subroutine
-    TAY     ;Now contains bullet index
-
-    LDX #$00    ;x will index all other entities, looking for collidable (enemy)
-checkbulletcollisionloop:
-    CPX #TOTALENTITIES
+    PHP     ;saving P because carry flag is needed right after subroutine\
+    
+    LDY #$01    ;Y will index all other entities, looking for collidable (enemy), can skip player again by starting at 1
+checkbulletcollisionloop: ;Y = iterator, X = bullet index
+    LDA objcount
+    STA collisiontmp         ;compare current iteration to objcount+1 (index needs to run loop if it is the same number as objcount)
+    INC collisiontmp         ;borrowing ptr location          
+    TYA
+    CMP collisiontmp
     BEQ finishedbulletcollision
-    LDA entities+Entity::type, x
+    
+    LDA TYPE, Y
     CMP #EntityType::Enemy           ;for now simply check for "enemy". This section can become more robust as we add new objects.
     BNE checkbulletentityfinished
 
     ;Carry flag truth set: A < Mem = C0; A => Mem = C1
     ;TODO: can we save cycles by handling all subtraction logic with CMP? WE CAN! I'm smart.
-    LDA entities+Entity::xpos, y    ;get bullet's current x pos (index held in Y)
+    ;Check X left of enemy
+    LDA XPOS, X                     ;get bullet's current x pos (index held in Y)
     CLC
     ADC #$05                        ;get bullet's rightmost collision xpos (point C) 
     STA collisiontmp               
-    LDA entities+Entity::xpos, x    ;left most position of enemy
-    ;SEC
-    ;SBC collisiontmp                ;x(e) - x(b)
+    LDA XPOS, Y                     ;left most position of enemy
     CMP collisiontmp
     BCS checkbulletentityfinished   ;CHECK 1: A(enemy x left) is greater than Mem(bullet x right), it's a miss.
-    LDA entities+Entity::xpos, y
+    ;Check X right of enemy
+    LDA XPOS, X
     CLC
     ADC #$02
     STA collisiontmp
-    LDA entities+Entity::xpos, x
+    LDA XPOS, Y
     CLC
     ADC #$08                        ;x(e) becomes rightmost x-pixel of enemy
-    ;SEC
-    ;SBC collisiontmp                
     CMP collisiontmp                ;CHECK 2: A(enemy x, right side) is less than Mem(bullet x left)
-    BCC checkbulletentityfinished   ;this time, if it's less than, we know that it's a miss. Bullet is to the right of the enemy Signed byte range may kill us ofc.
+    BCC checkbulletentityfinished   ;this time, if it's less than, we know that it's a miss. Bullet is to the right of the enemy.
     ;Check Y
-    ;Y in particular is running into signed byte errors!!!!
-    LDA entities+Entity::ypos, y    ;Bullet y pos
+    LDA YPOS, X                     ;Bullet y pos
     STA collisiontmp
-    LDA entities+Entity::ypos, x    ;Enemy y (add 8)
+    LDA YPOS, Y                     ;Enemy y (add 8)
     CLC
     ADC #$08
-    ;SEC
-    ;SBC collisiontmp
     CMP collisiontmp                ;CHECK 3: A(enemy y bottom) vs. Mem(bullet y top). If A < Mem (BCC), it's a miss 
     BCC checkbulletentityfinished
     ;If we made it this far, we have COLLISION! Using CMP solves the signed byte problem too!!!
     ;Collision logic - for now just clear enemy and bullet by setting type/data to 0, and x/y to FF
 
     LDA #EntityType::NoEntity
-    STA entities+Entity::type, x
-    STA entities+Entity::type, y
-    STA entities+Entity::data, x
-    STA entities+Entity::data, y
+    STA TYPE, x
+    STA TYPE, y
+    STA DATA, x
+    STA DATA, y
     LDA #$FF
-    STA entities+Entity::xpos, x
-    STA entities+Entity::xpos, y
-    STA entities+Entity::ypos, x
-    STA entities+Entity::ypos, y
+    STA XPOS, x
+    STA XPOS, y
+    STA YPOS, x
+    STA YPOS, y
     JMP finishedbulletcollision
     ;;;;;;;;;;;;;;;;;;;;;;pause writing at video 5, 45:00. I want to see where he gets to before commiting to a collision engine
     ;;Gonna try writing it myself from here.
 checkbulletentityfinished:      ;increment to next entity
-    TXA
-    CLC
-    ADC #.sizeof(Entity)
-    TAX
+    INY
     JMP checkbulletcollisionloop
 finishedbulletcollision:
     PLP
@@ -592,6 +571,9 @@ VBLANK:
     PHA
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;DOD: is it worth having another array for OAM data? prob not.
+;Although as many more graphical options are added, maybe it is better so that one draw process can be called.
+;And OAM data sent in as arguments
 
 ;begin populating the OAM data in memory
     LDX #$00        ;x will index mem locations of entity data (getter)
@@ -602,7 +584,7 @@ VBLANK:
     STA spritemem+1
 
 DRAWENTITIES:                       ;copied his code in for now. 
-    LDA entities+Entity::type, x
+    LDA TYPE, x
     CMP #EntityType::PlayerType
     BEQ PLAYERSPRITE
     CMP #EntityType::Bullet
@@ -612,7 +594,7 @@ DRAWENTITIES:                       ;copied his code in for now.
     JMP CHECKENDSPRITE
     ;see https://www.nesdev.org/wiki/PPU_OAM
 ENEMY:
-    LDA entities+Entity::ypos, x ; y   ;byte 1 = y position
+    LDA YPOS, x ; y   ;byte 1 = y position
     STA (spritemem), y
     INY
     LDA #$02 ; tile
@@ -621,7 +603,7 @@ ENEMY:
     LDA #$01 ; palette etc
     STA (spritemem), y                  ;byte 3 = palette and layer
     INY
-    LDA entities+Entity::xpos, x ; x
+    LDA XPOS, x ; x
     STA (spritemem), y                  ;byte 4 = x position
     INY
     ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -630,7 +612,7 @@ ENEMY:
 
 
 BULLET:
-    LDA entities+Entity::ypos, x ; y   ;byte 1 = y position
+    LDA YPOS, x ; y   ;byte 1 = y position
     STA (spritemem), y
     INY
     LDA #$01 ; tile
@@ -639,7 +621,7 @@ BULLET:
     LDA #$01 ; palette etc
     STA (spritemem), y                  ;byte 3 = palette and layer
     INY
-    LDA entities+Entity::xpos, x ; x
+    LDA XPOS, x ; x
     STA (spritemem), y                  ;byte 4 = x position
     INY
     ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -648,7 +630,7 @@ BULLET:
 
 PLAYERSPRITE:
     ;top left sprite
-    LDA entities+Entity::ypos, x ; y
+    LDA YPOS, x ; y
     STA (spritemem), y
     INY
     LDA #$00 ; tile
@@ -657,12 +639,12 @@ PLAYERSPRITE:
     LDA #$01 ; palette etc
     STA (spritemem), y
     INY
-    LDA entities+Entity::xpos, x   ; x
+    LDA XPOS, x   ; x
     STA (spritemem), y
     INY
 
     ;bottom left sprite
-    LDA entities+Entity::ypos, x ; y
+    LDA YPOS, x ; y
     CLC
     ADC #$08   ;Add 8 pixels to y-pos for second sprite
     STA (spritemem), y
@@ -673,12 +655,12 @@ PLAYERSPRITE:
     LDA #$01   ;palette
     STA (spritemem), y
     INY
-    LDA entities+Entity::xpos, x ; x position
+    LDA XPOS, x ; x position
     STA (spritemem), y
     INY
 
     ;top right sprite
-    LDA entities+Entity::ypos
+    LDA YPOS
     STA (spritemem), y
     INY
     LDA #$00     ;same as top left but we will flip it and add 8 to xpos
@@ -687,14 +669,14 @@ PLAYERSPRITE:
     LDA #$41     ;palette %01000001   palette 1, flip horizontal
     STA (spritemem), y
     INY
-    LDA entities+Entity::xpos, x
+    LDA XPOS, x
     CLC
     ADC #$08
     STA (spritemem), y
     INY
 
     ;bottom right
-    LDA entities+Entity::ypos, x ; y
+    LDA YPOS, x ; y
     CLC
     ADC #$08   ;Add 8 pixels to y-pos for second sprite
     STA (spritemem), y
@@ -705,7 +687,7 @@ PLAYERSPRITE:
     LDA #$41   ;palette with h-flip
     STA (spritemem), y
     INY
-    LDA entities+Entity::xpos, x
+    LDA XPOS, x
     CLC
     ADC #$08
     STA (spritemem), y
@@ -713,11 +695,8 @@ PLAYERSPRITE:
 
     ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 CHECKENDSPRITE:
-    TXA
-    CLC
-    ADC #.sizeof(Entity)
-    TAX
-    CPX #TOTALENTITIES
+    INX
+    CPX objcount
     BEQ DONESPRITE
     JMP DRAWENTITIES
 
@@ -777,42 +756,50 @@ donewithppu:
 ;in blanks if there's a convenient time in game (perhaps anytime player pauses or calls the ring menu)
 
 TYPE:    
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
 XPOS:
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
 YPOS:
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
-    .byte #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF, #$FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+    .byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+DATA: ;counter for subpixel movement, or whatever other use
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
 HEALTH: ;TODO: after system works, incorporate second enemy-type with 3 HP
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-    .byte #$00, #$00, #$00, #$00, #$00, #$00, #$00, #$00
-
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
+    .byte $00, $00, $00, $00, $00, $00, $00, $00
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;      Graphics Data       ;
