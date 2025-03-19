@@ -29,12 +29,17 @@ APUSTATUS       = $4015
 JOYPAD1         = $4016
 JOYPAD2         = $4017
 
+;Entity management fields. I can shrink these when I find my hard cap for max entities
+;We're definitely not getting 64 bytes so I may as well shrink to 32
 ;Define 64B data arrays in $0400 and $0500 block,
 XPOS            = $0400 ;fill with $FF
-YPOS            = $0440
+YPOS            = $0420
 TYPE            = $0500 ;fill with $00
-DATA            = $0540
-HEALTH          = $0580
+DATA            = $0520
+HEALTH          = $0540
+
+
+
 
 ;Now eschewing the OOP approach, entity type, along with x/y/other data, will each get it's own array, and we'll see how big
 ;we can make it.
@@ -248,7 +253,7 @@ GAMELOOP:
 resetobjcount:
     LDA #$00
     STA tempvar
-    LDX #$40
+    LDX #$20
 findlastloop:
     DEX
     LDA TYPE, X
