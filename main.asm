@@ -63,8 +63,9 @@ drawcomplete:   .res 1
 objcount:       .res 1
 tempvar:        .res 1
 collisiontmp:   .res 1     ;used in collision routine to store extra value
+playerspr:      .res 1
 xhold:          .res 1
-yhold:          .res 1      ;I could potentially just keep a handful of generaic vars on zero page and reuse them
+yhold:          .res 1      ;I could potentially just keep a handful of generic vars on zero page and reuse them
 scrollx:        .res 1
 scrolly:        .res 1
 buttonflag:     .res 1
@@ -73,7 +74,7 @@ hswaph:         .res 1
 spritemem:      .res 2 
 ptr:            .res 2
 
-;MAXENTITIES = 10            ;We don't have any entity types defined yet, so I'm going to skip some of the tutorial lines
+MAXENTITIES = 18            ;We don't have any entity types defined yet, so I'm going to skip some of the tutorial lines
 ;entities:   .res .sizeof(Entity) * MAXENTITIES  ;Here I can reserve space for commonly used game objects
 ;TOTALENTITIES = .sizeof(Entity) * MAXENTITIES   ;He does the sizeof(Entity) * MAXENTITIES to make sure he always has 
                                                 ;enough space on zeropage to handle objects on screen quickly
@@ -265,6 +266,10 @@ findlastloop:
 INITSPRITES:
     LDY #$00
     LDA #$FF
+    ;set player sprite to center
+    LDA #$00
+    STA playerspr
+
 INITSPRITELOOP:
     STA (spritemem), y
     INY
@@ -322,6 +327,8 @@ checkleft:
     AND #$02                ;abssudLr  bit2 is left, AND will return true if left is 1 (not pressed) then jump to checkright
     BEQ checkright          ;
     DEC XPOS   ;decrement x position
+    LDA #02         ;After ROR check, will be $01 carry clear
+    STA playerspr
     JMP checkup ; don't allow for left and right at the same time (jump past checkright if left was pressed)
 
 checkright:
@@ -329,7 +336,8 @@ checkright:
     AND #$01
     BEQ checkup
     INC XPOS
-
+    LDA #$03        ;after ROR check, will be $01 carry set
+    STA playerspr
 checkup:
     LDA controller
     AND #$08
@@ -405,7 +413,7 @@ addenemy:
 addentity:
     INC objcount
     LDA objcount
-    CMP #$20               ;arrays hold 64 objects, max entities
+    CMP #MAXENTITIES               ;arrays hold 64 objects, max entities
     BCS finishcontrols
     LDX #$00
 findlowestindexloop:        ;potential for infinte loop? If TYPE is full, it shouldn't make it this far
@@ -625,7 +633,7 @@ ENEMY:
     LDA YPOS, x ; y   ;byte 1 = y position
     STA (spritemem), y
     INY
-    LDA #$02 ; tile
+    LDA #$04 ; tile
     STA (spritemem), y                  ;byte 2 = sprite from table
     INY
     LDA #$01 ; palette etc
@@ -635,15 +643,13 @@ ENEMY:
     STA (spritemem), y                  ;byte 4 = x position
     INY
     ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
     JMP CHECKENDSPRITE
-
 
 BULLET:
     LDA YPOS, x ; y   ;byte 1 = y position
     STA (spritemem), y
     INY
-    LDA #$01 ; tile
+    LDA #$03 ; tile
     STA (spritemem), y                  ;byte 2 = sprite from table
     INY
     LDA #$01 ; palette etc
@@ -656,12 +662,21 @@ BULLET:
 
     JMP CHECKENDSPRITE
 
-PLAYERSPRITE:
+PLAYERSPRITE:       ;;;;;;;;;;;;;CHECK!!! Check these comparisons first if buggy
+    LDA playerspr
+    CMP #$00
+    BEQ CENTERED
+    CLC
+    ROR
+    BCS BANKRIGHT
+    JMP BANKLEFT
+    ;If neither, fall through
+CENTERED:
     ;top left sprite
     LDA YPOS, x ; y
     STA (spritemem), y
     INY
-    LDA #$00 ; tile
+    LDA #$00        ;#$00 straight tile
     STA (spritemem), y
     INY
     LDA #$01 ; palette etc
@@ -670,14 +685,13 @@ PLAYERSPRITE:
     LDA XPOS, x   ; x
     STA (spritemem), y
     INY
-
     ;bottom left sprite
     LDA YPOS, x ; y
     CLC
     ADC #$08   ;Add 8 pixels to y-pos for second sprite
     STA (spritemem), y
     INY
-    LDA #$10   ;tile location 16, first tile of second row
+    LDA #$10      ;first tile location + 16, first tile of second row
     STA (spritemem), y
     INY
     LDA #$01   ;palette
@@ -686,7 +700,6 @@ PLAYERSPRITE:
     LDA XPOS, x ; x position
     STA (spritemem), y
     INY
-
     ;top right sprite
     LDA YPOS
     STA (spritemem), y
@@ -702,7 +715,6 @@ PLAYERSPRITE:
     ADC #$08
     STA (spritemem), y
     INY
-
     ;bottom right
     LDA YPOS, x ; y
     CLC
@@ -720,7 +732,131 @@ PLAYERSPRITE:
     ADC #$08
     STA (spritemem), y
     INY
-
+    JMP CHECKENDSPRITE
+BANKRIGHT:
+    ;top left sprite
+    LDA YPOS, x ; y
+    STA (spritemem), y
+    INY
+    LDA #$02        ;#$00 straight tile
+    STA (spritemem), y
+    INY
+    LDA #$41 ; palette etc
+    STA (spritemem), y
+    INY
+    LDA XPOS, x   ; x
+    STA (spritemem), y
+    INY
+    ;bottom left sprite
+    LDA YPOS, x ; y
+    CLC
+    ADC #$08   ;Add 8 pixels to y-pos for second sprite
+    STA (spritemem), y
+    INY
+    LDA #$12      ;first tile location + 16, first tile of second row
+    STA (spritemem), y
+    INY
+    LDA #$41   ;palette
+    STA (spritemem), y
+    INY
+    LDA XPOS, x ; x position
+    STA (spritemem), y
+    INY
+    ;top right sprite
+    LDA YPOS
+    STA (spritemem), y
+    INY
+    LDA #$01     ;same as top left but we will flip it and add 8 to xpos
+    STA (spritemem), y
+    INY
+    LDA #$41     ;palette %01000001   palette 1, flip horizontal
+    STA (spritemem), y
+    INY
+    LDA XPOS, x
+    CLC
+    ADC #$08
+    STA (spritemem), y
+    INY
+    ;bottom right
+    LDA YPOS, x ; y
+    CLC
+    ADC #$08   ;Add 8 pixels to y-pos for second sprite
+    STA (spritemem), y
+    INY
+    LDA #$11   ;tile location 16, first tile of second row
+    STA (spritemem), y
+    INY
+    LDA #$41   ;palette with h-flip
+    STA (spritemem), y
+    INY
+    LDA XPOS, x
+    CLC
+    ADC #$08
+    STA (spritemem), y
+    INY
+    JMP CHECKENDSPRITE
+BANKLEFT:
+    ;top left sprite
+    LDA YPOS, x ; y
+    STA (spritemem), y
+    INY
+    LDA #$01            ;first tile of banked position
+    STA (spritemem), y
+    INY
+    LDA #$01 ; palette etc
+    STA (spritemem), y
+    INY
+    LDA XPOS, x   ; x
+    STA (spritemem), y
+    INY
+    ;bottom left sprite
+    LDA YPOS, x ; y
+    CLC
+    ADC #$08   ;Add 8 pixels to y-pos for second sprite
+    STA (spritemem), y
+    INY
+    LDA #$11      ;first tile location + 16, first tile of second row
+    STA (spritemem), y
+    INY
+    LDA #$01   ;palette
+    STA (spritemem), y
+    INY
+    LDA XPOS, x ; x position
+    STA (spritemem), y
+    INY
+    ;top right sprite
+    LDA YPOS
+    STA (spritemem), y
+    INY
+    LDA #$02     ;top right tile location
+    STA (spritemem), y
+    INY
+    LDA #$01     ;palette 
+    STA (spritemem), y
+    INY
+    LDA XPOS, x
+    CLC
+    ADC #$08
+    STA (spritemem), y
+    INY
+    ;bottom right
+    LDA YPOS, x ; y
+    CLC
+    ADC #$08   ;Add 8 pixels to y-pos for second sprite
+    STA (spritemem), y
+    INY
+    LDA #$12   ;tile location 16, first tile of second row
+    STA (spritemem), y
+    INY
+    LDA #$01   ;palette 
+    STA (spritemem), y
+    INY
+    LDA XPOS, x
+    CLC
+    ADC #$08
+    STA (spritemem), y
+    INY
+    ;Fall through
     ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 CHECKENDSPRITE:
     INX
