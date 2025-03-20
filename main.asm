@@ -4,7 +4,7 @@
     .byte $1a
     .byte $02       ; 4 - 2*16k PRG ROM
     .byte $01       ; 5 - 8k CHR ROM
-    .byte %00000001 ; 6 - mapper - horizontal mirroring
+    .byte %00000000 ; 6 - mapper - horizontal mirroring
     .byte $00       ; 7
     .byte $00       ; 8 - 
     .byte $00       ; 9 - NTSC
@@ -69,11 +69,14 @@ xhold:          .res 1      ;vars to hold position values during collision detec
 yhold:          .res 1      ;I could potentially just keep a handful of generic vars on zero page and reuse them
 scrollx:        .res 1
 scrolly:        .res 1
+nametableswap:  .res 1
+swaptoggle:     .res 1
 buttonflag:     .res 1
-swap:           .res 1
-hswaph:         .res 1
 spritemem:      .res 2 
 ptr:            .res 2
+
+    
+
 
 MAXENTITIES = 18            ;We don't have any entity types defined yet, so I'm going to skip some of the tutorial lines
 ;entities:   .res .sizeof(Entity) * MAXENTITIES  ;Here I can reserve space for commonly used game objects
@@ -137,6 +140,12 @@ CLEARMEM:
     LDX #$00
     STA objcount
 
+    LDA #$00
+    STA scrollx
+    STA nametableswap
+    LDA #$EE
+    STA scrolly
+
 ;looks good up to here
 
 
@@ -172,14 +181,6 @@ CLEARMEM:
 
 ; initialize background hi and low
 
-    ;LDA #$10
-    ;STA seed
-    ;STA seed+1
-
-   ;LDA #$02
-    ;STA scrolly
-    ;not scrolling yet
-
     LDX #$00
 PALETTELOAD:
     LDA PALETTE, x
@@ -189,7 +190,7 @@ PALETTELOAD:
     BNE PALETTELOAD
 
 ;;;;;;;;;;;;;;;;;;;;;;;;
-
+BGLOAD:
     LDY #$00            ;use y index to cycle through bg sprite sheet
 
     LDA $2002           ;PPUSTATUS    Is he reading to clear vblank flag? Neads to be changed to use NMI instead
@@ -197,22 +198,38 @@ PALETTELOAD:
     STA $2006           ;PPUADDR      we are using $2000 for graphics memory
     LDA #$00
     STA $2006           ;PPUADDR
-    LDX #$04            ;loop four times $FF to get a full kilobyte
-    LDY #$00
-    STA ptr       ;set byte pointer to 0
+    STA tempvar
+    STA ptr
     LDA #<NAMETABLE0
     STA ptr+0
     LDA #>NAMETABLE0
     STA ptr+1
-BGLOAD:
+BGLOADPREP:
+    LDX #$04            ;loop eight times $FF to get 2 full kilobytes
+    LDY #$00
+BGLOADLOOP:
     LDA (ptr), Y   ;load data from NAMETABLE0
     STA $2007           ;PPUDATA
     INY
-    BNE BGLOAD         ;when Y cycles past $FF to $00, decrement X
+    BNE BGLOADLOOP         ;when Y cycles past $FF to $00, decrement X
     DEX
-    BEQ BGLOADDONE          ;jump to end if X hits 0
+    BEQ LOADNEXTTABLE          ;jump to end if X hits 0
     INC ptr+1       ;increase the high byte by 1 (ptr is low byte, little endian)
-    JMP BGLOAD          ;loop back on X
+    JMP BGLOADLOOP          ;loop back on X
+LOADNEXTTABLE:
+    LDA tempvar
+    CMP #$01
+    BEQ BGLOADDONE
+    LDA #$28
+    STA $2006
+    LDA #$00
+    STA $2006
+    LDA #<NAMETABLE1
+    STA ptr+0
+    LDA #>NAMETABLE1
+    STA ptr+1
+    INC tempvar
+    JMP BGLOADPREP
 BGLOADDONE:
 ; configure for loading the attributes
     LDA $2002
@@ -230,6 +247,9 @@ ATTLOAD:
     BNE ATTLOAD
 
     JSR WAITFORVBLANK
+
+
+
 
     LDA #%10000000
     STA $2000           ;PPUCONTROL
@@ -874,20 +894,53 @@ DONESPRITE:
     STA $4014   ;OAMDMA byte - This action shoves everything we wrote to $0200 with the registerss into the PPU via OAMDMA
     NOP         ;pause for sync
 
+    
     LDA #$00    ;clear register
     STA $2006
     STA $2006   ;$2006 takes a double write PPUDATA
 
-    ;when ready for scrolling background
-    ;LDA scrollx
-    ;STA $2005
-    ;LDA scrolly
-    ;STA $2005
-
     LDA #%10001000
-    ORA swap
+    ORA nametableswap
     LDX $2002   ;clear the register before
     STA $2000
+
+    ;when ready for scrolling background
+    LDA $2002
+    LDA scrollx
+    STA $2005
+    LDA scrolly
+    STA $2005
+
+    DEC scrolly
+    LDA scrolly
+    CMP #$00
+    BEQ swapnametables
+    DEC scrolly
+    LDA scrolly
+    CMP #$00
+    
+    BEQ swapnametables
+
+    JMP cleanup
+swapnametables:
+
+    NOP
+    NOP
+    NOP
+    NOP
+    ;Something is happening here to cause a flicker before the name tables finally swap places.
+    ;LDA swaptoggle
+    ;EOR #$01
+    ;STA swaptoggle
+    ;CMP #$00
+    ;BEQ cleanup
+
+    LDA nametableswap     ;either %00000000 or %00000010
+    EOR #$02
+    STA nametableswap
+    LDA #$EF
+    STA scrolly
+cleanup:
 
 donewithppu:
     LDA #$01
@@ -970,17 +1023,6 @@ NAMETABLE0:                                                                     
     .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $06, $03, $04, $0B, $06, $03, $04, $03, $04, $0B, $00, $00, $00
     .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $08, $09, $0A, $00, $08, $09, $08, $09, $0A, $00, $00, $00
     .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-
-ATTRIBUTE0:   ;8x8 = 64 bytes $23C0 -> $23FF
-    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
-    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
-    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
-    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
-    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
-    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
-    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
-    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
-
 NAMETABLE1:                                                                              ;                                      ;
     .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
     .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
@@ -1012,6 +1054,17 @@ NAMETABLE1:                                                                     
     .byte $00, $00, $00, $08, $09, $08, $09, $0A, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
     .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
     .byte $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+
+
+ATTRIBUTE0:   ;8x8 = 64 bytes $23C0 -> $23FF
+    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
+    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
+    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
+    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
+    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
+    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
+    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
+    .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
 
 ATTRIBUTE1:   ;8x8 = 64 bytes $23C0 -> $23FF
     .byte %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000, %00000000
