@@ -1,0 +1,68 @@
+Nametable compression:
+Clearly a 32x30 byte nametable filled with 00s is not going to work. How to compress, decompress, and write in an effective amount of time.
+
+X and Y position within a 32x30 grid can be expressed with less than a byte, 3 or 4 bits. 4 bits can represent numbers up to 16.
+
+First idea was something like a sparse array. My current maps use 10 tiles. (8x8) I will obviously want more than that, but water can be done with a palette swap. 
+
+32x30 = 960 bytes.
+
+Sparse array will have an event horizon, but might work with my current maps, or similar ones. The event horizon is clearly if more than half the map is not a single tile.
+Untenable.
+
+So we must sparse array the sparse array
+We can use another byte for "how many in the row". Can we use the top nibble of the ID byte?
+
+(ID followed by (row, column) location byte pairs.)
+01[00 16 00 18 02 14 02 16 02 18 04 14 04 16 04 18 06 16 06 18 08 16 08 18 08 1A 0A 18 0A 1A 0C 18 0C 1A OE 16 OE 18 OE 1A
+   10 16 10 18 10 1A 12 16 12 18 12 1A 14 14 14 16 14 18 16 14 16 16 16 18 18 14 18 16 18 18 18 1A 18 1C 1A 14 1A 18 1A 1A   81 bytes
+
+Pretty good
+(ID, Row, Amt)
+(High bit set means ID - 10000001 = ID 01 = $81) (1 byte for "canvas" byte. Fill nametable first, then layout the tiles)
+81 [00 02 16 18] [02 03 14 16 18] [04 03 14 16 18] [06 02 16 18] [08 02 18 1A] [0A 02 18 1A] [0C 02 18 1A] [0E 03 16 18 1A] 
+   [10 03 16 18 1A] [12 03 16 18 1A] [14 03 14 16 18] [16 03 14 16 18] [18 05 14 16 18 1A 1C] [1A 03 14 18 1A]		     67 bytes
+82 [00 02 17 19] [02 03 15 17 19] [04 03 15 17 19] [06 02 17 19] [08 03 17 19 1B] [0A 02 19 1B] [0C 02 19 1B] [0E 03 17 19 1B] 
+   [10 03 17 19 1B] [12 03 17 19 1B] [14 03 15 17 19] [16 03 15 17 19] [18 05 15 17 19 1B 1D] [1A 03 15 19 1B]               68 bytes
+
+
+Same concept, column-wise
+ID, (Column, Amt, Row loc ...)
+81 [14 06 02 04 14 16 18 1A] [16 0B 00 02 04 06 08 0E 10 12 14 16 18] [18 0E 00 02 04 06 08 0A 0C 0E 10 12 14 16 18 1A] 
+   [1A 08 08 0A 0C 0E 10 12 18 1A] [1C 01 18]                                                                             51 bytes
+82 [15 06 02 04 14 16 18 1A] [17 0B 00 02 04 06 08 0E 10 12 14 16 18] [19 0E 00 02 04 06 08 0A 0C 0E 10 12 14 16 18 1A]
+   [1B 08 08 0A 0C 0E 10 12 18 1A] [1D 01 18]										  51 bytes
+83 [14 06 03 05 15 17 19 1B] [16 0B 01 03 05 07 09 0F 11 13 15 17 19] [18 0E 01 03 05 07 09 0B 0D 0F 11 13 15 17 19 1B]
+   [1A 08 09 0B 0C 0F 11 13 19 1B] [1C 01 19]										  51 bytes
+84 [15 06 03 05 15 17 19 1B] [17 0B 01 03 05 07 09 0F 11 13 15 17 19] [19 0E 01 03 05 07 09 0B 0D 0F 11 13 15 17 19 1B]
+   [1B 08 09 0B 0C 0F 11 13 19 1B] [1D 01 19]                                                                             51 bytes
+85 [13 06 02 04 14 16 18 1A] [15 06 00 06 08 0E 10 12] [17 02 0A 0C]                                                      21 bytes
+86 [13 06 03 05 15 17 19 0B] [15 06 01 07 09 0F 11 13] [17 03 0B 0D 1B]							  22 bytes
+88 [14 02 06 1C] [16 02 0A 1A] [18 01 1C] [1A 01 1C]                                                                      15 bytes
+89 [15 01 1C] [17 01 1A] [19 01 1C] [1B 01 1C] [1D 01 1A]								  16 bytes
+8A [16 01 1C] [1A 01 04] [1B 01 14] [1C 02 14 1C] [1E 01 1A]								  17 bytes
+8B [16 01 1B] [1A 05 01 03 07 15 17] [1C 07 09 0B 0D 0F 11 13 1B] [1E 01 19]						  23 bytes
+8C [1A 06 00 02 05 06 14 16] [1C 07 08 0A 0C 0E 10 12] [1E 01 18]							  20 bytes
+															------------
+												Total:			  338 bytes     1/3 compression
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
